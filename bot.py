@@ -30,35 +30,19 @@ import time
 import parser
 from secret_config import TOKEN_NAME as token
 from dates_config import today_date, tomorrow_date, datetime_object_date
-from parser import get_scheldue
+from parser import get_scheldue, get_grp_list
 from UseDB import opendb
 from datetime import date, timedelta, datetime
 import os
+from telebot import types
 
 bot = telebot.TeleBot(token)
 
-
-def take_schedule(message, group_name):
-	print('\n', group_name, '\n')
-	schedule = ''
-	if group_name == None or group_name == '':
-		bot.send_message(message.chat.id, 'В базе не найден. Попробуй удалить номер группы и записать заново')
-	try:
-		try:
-			schedule = open('data/' + group_name + '.txt', 'r').read().split('\ufeff')[-1].split('\n')
-		except TypeError:
-			print('TypeError! Хз с чего он')
-			bot.send_message(message.chat.id,
-							 'Ошибка! Попробуй удалить номер группы и записать заного. Если не помогло - отправь скрин диалога @forgottenmemes')
-
-	except FileNotFoundError:
-		print('Нет расписания! Группа = ', group_name)
-		bot.send_message(message.chat.id,
-						 'Ошибка! Попробуй удалить номер группы и записать заного. Если не помогло - отправь скрин диалога @forgottenmemes')
-		open('gr_404.txt', 'w').write(group_name)
-
-	return schedule
-	
+@bot.message_handler(commands=['all'])
+def send_to_all(message):
+	if message.chat.id != 64634999:
+		return
+	#Дописать for для отправки сообщения всем
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
@@ -68,25 +52,40 @@ def handle_start(message):
 		handle_help(message)
 		return
 
-	current_func = 'change_group'
-	bot.send_message(message.chat.id, config.start)
+	msg = bot.send_message(message.chat.id, config.start)
+	bot.register_next_step_handler(msg, regestration)
 
+def regestration(message):
+	all_groups = get_grp_list()
+	if not (message.text in all_groups):
+		opendb().ins_id(message)
+		gr_failture = bot.send_message(message.chat.id, config.completef)
+		
+		bot.register_next_step_handler(gr_failture, change_gr)
+		
+	else:
+		opendb().ins_all(message)
+		bot.send_message(message.chat.id, config.completet)
+		current_func = ''
+		handle_help(message)
 
+@bot.message_handler(func=lambda message: message.text == 'Назад')
 @bot.message_handler(commands=['help'])  # Обрабатывает команду /help
 def handle_help(message):
 	print('\nHelp ', message.chat.id, datetime.now())
 	markup = telebot.types.ReplyKeyboardMarkup()
-	markup.row('Какая следующая пара?', 'Узнать расписание')
-	markup.row('Когда уже домой?')
-	markup.row('Какая сейчас неделя?', 'Об авторах')
-	markup.row('Настройки')
+	markup.row('Расписание занятий', 'Расписание сессии')
+	markup.row('Какая сейчас неделя?', 'Когда уже домой?')
+	markup.row('Прочее', 'Настройки')
 	bot.send_message(message.chat.id, 'Что ты хочешь узнать?', reply_markup=markup)  # Выводит их как ответ от бота
 
 
+@bot.message_handler(func=lambda message: message.text == 'Настройки')
 @bot.message_handler(commands=['settings'])  # Обработка команды /settings
 def handle_settings(message):
 	print(datetime.now(), "\nнастройки от ", message.chat.id)
 	markup = telebot.types.ReplyKeyboardMarkup()
+#	markup.row('Оповещения')
 	markup.row('📝 Изменить группу')
 	markup.row('❌ Сбросить настройки')
 	markup.row('Назад')
@@ -103,17 +102,17 @@ def now_week(message):
 	bot.send_message(message.chat.id, sended_message)
 
 
-@bot.message_handler(func=lambda message: message.text == 'Сессия')
+@bot.message_handler(func=lambda message: message.text == 'Расписание сессии')
 def session_menu(message):
 	print('\nМеню сессии ', message.chat.id, datetime.now())
 	markup = telebot.types.ReplyKeyboardMarkup()
 	markup.row('Сколько дней до сессии?', 'Расписание экзаменов')
-	markup.row('Ближайший экзамен')
+	markup.row('Следующий экзамен')
 	markup.row('Назад')
 	bot.send_message(message.chat.id, 'Ох, сочувствую.', reply_markup=markup)
 
 
-@bot.message_handler(func=lambda message: message.text == 'Ближайший экзамен')
+@bot.message_handler(func=lambda message: message.text == 'Следующий экзамен')
 def closest_exam(message):
 	print('\nБлижайший экзамен ', message.chat.id, datetime.now())
 	group_name = opendb().find_gr(message)
@@ -148,15 +147,35 @@ def closest_exam(message):
 	bot.send_message(message.chat.id, sended_message)
 
 
-@bot.message_handler(func=lambda message: message.text == 'Узнать расписание')
+@bot.message_handler(func=lambda message: message.text == 'Расписание занятий')
 def timetable_menu(message):
 	print('\nМеню расписания ', message.chat.id, datetime.now())
-	markup = telebot.types.ReplyKeyboardMarkup()
-	markup.row('На завтра', 'На сегодня')
-	markup.row('На неделю', 'Какая лаба следующая?')
-	markup.row('Назад')
-	bot.send_message(message.chat.id, 'Расписание чего?', reply_markup=markup)
 
+	markup = telebot.types.InlineKeyboardMarkup()
+
+	today_schedule = types.InlineKeyboardButton(text='На сегодня', callback_data='today_schedule')
+	next_lessonInline = types.InlineKeyboardButton(text='Следующая пара', callback_data='next_lesson')
+	next_labaInline = types.InlineKeyboardButton(text='Следующая лаба', callback_data='next_laba')
+	next_schedule = types.InlineKeyboardButton(text='Следующий учебный день', callback_data='next_schedule')
+	week_schedule = types.InlineKeyboardButton(text='На неделю', callback_data='week_schedule')
+
+	markup.add(today_schedule, next_lessonInline, next_labaInline, next_schedule, week_schedule)
+
+	bot.send_message(message.chat.id, 'Выбери из предложенного', reply_markup=markup)
+
+
+@bot.message_handler(func=lambda message: message.text == 'Расписание сессии')
+def session_date(message):
+	print('\nМеню расписания сессии', message.chat.id, datetime.now())
+
+	markup = telebot.types.InlineKeyboardMarkup()
+
+	next_examInline = types.InlineKeyboardButton(text='Следующий экзамен', callback_data='next_exam')
+	all_examsInline = types.InlineKeyboardButton(text='На неделю', callback_data='week_schedule')
+
+	markup.add(next_examInline, all_examsInline)
+
+	bot.send_message(message.chat.id, 'Выбери из предложенного', reply_markup=markup)
 
 @bot.message_handler(func=lambda message: '📝 Изменить группу' == message.text)
 def edit_information(message):
@@ -171,29 +190,16 @@ def delete(message):
 	print(datetime.now(), "Сброс настроек от ", message.chat.id, message.chat.username)
 	markup = telebot.types.ReplyKeyboardMarkup()
 	markup.row('🔥 Да', '🚫 Нет')
-	bot.send_message(message.chat.id, 'Вы уверены?', reply_markup=markup)
+	msg = bot.send_message(message.chat.id, 'Вы уверены?', reply_markup=markup)
+	bot.register_next_step_handler(msg, sure)
 
-
-@bot.message_handler(func=lambda message: message.text == '🔥 Да')
 def sure(message):
-	opendb().del_usr(message)
-	bot.send_message(message.chat.id, 'Данные удалены')
-
-
-@bot.message_handler(func=lambda message: message.text == '🚫 Нет' or message.text == 'Назад')
-def back(message):
-	current_func == ''
-	handle_help(message)
-
-
-@bot.message_handler(func=lambda message: message.text == 'Настройки')
-def setting(message):
-	handle_settings(message)
-
-
-@bot.message_handler(func=lambda message: message.text == 'Репозиторий лямбды на гите')
-def labda_on_git(message):
-	bot.send_message(message.chat.id, config.lambdaongit)
+	if message.text == '🔥 Да':
+		opendb().del_usr(message)
+		bot.send_message(message.chat.id, 'Данные удалены')
+	
+	else:
+		handle_help(message)
 
 
 @bot.message_handler(func=lambda message: message.text == 'Сколько дней до сессии?')
@@ -216,8 +222,8 @@ def enspiration_date(message):
 		bot.send_message(message.chat.id, 'Дай отдохнуть, лето же!')
 
 
-@bot.message_handler(func=lambda message: message.text == 'Расписание экзаменов')
-def session_date(message):
+@bot.message_handler(func=lambda message: message.text == 'Расписание экзаменов') 
+def session_timetable(message):
 	print('\nРасписание экзаменов', message.chat.id, datetime.now())
 	group_name = opendb().find_gr(message)
 
@@ -231,79 +237,106 @@ def session_date(message):
 
 	bot.send_message(message.chat.id, sended_message)
 	print(sended_message)
+	
+@bot.message_handler(func=lambda message: message.text == 'Прочее')
+def other(message):
+	bot.send_message(message.chat.id, 'Скоро тут будет хорошо. Но не сегодня :)')
+	return
 
 
-@bot.message_handler(
-	func=lambda message: 'На завтра' == message.text or 'На сегодня' == message.text)
-def tomorrow_table(message):
-	print(datetime.now(), "\nНа сегодня\завтра ", message.chat.id, message.chat.username)
-	group_name = opendb().find_gr(message)
+@bot.callback_query_handler(func=lambda call: call.data == 'next_schedule')
+def next_schedule(call):
+	group_name = opendb().find_gr(call.message)
 	print(group_name)
 	dates, schedule = get_scheldue(group_name)
 	sended_message = ''
 	
-	if 'На завтра' == message.text:
-		search_date = tomorrow_date
-	else:
-		search_date = today_date
+	nowtime = (datetime.now() + timedelta(hours=3)).strftime('%H:%M')
 	
+	next_date = 0
+	
+	if not today_date in dates or nowtime < schedule[dates.index(today_date)]['time'][0].split()[0]:
+		search_date = 0
+	elif tomorrow_date in dates and nowtime > schedule[dates.index(today_date)]['time'][0].split()[0]:
+		search_date = dates.index(tomorrow_date)
+	else:
+		search_date = 1
+	
+
+	try:
+		day = schedule[search_date]
+		sended_message += '===={}====\n'.format(dates[search_date])
+		for j in range(len(schedule[search_date]['title'])):
+			sended_message += '⌚' + day['time'][j] + '\n📝' + day['title'][j] + (('\n👤' + day['lecturer'][j]['name']) if (day['lecturer'][j]['name'] != 'None') else '') + ('\n📍' + day['location'][j] + '\n' if day['location'][j] != 'None' else '\n') + day['type'][j] + '\n'
+			sended_message += '''
+			'''
+	except ValueError:
+		sended_message = 'Пар нет, отдыхай :)'
+	bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=sended_message)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'today_schedule')
+def tomorrow_table(call):
+	group_name = opendb().find_gr(call.message)
+	print(group_name)
+	dates, schedule = get_scheldue(group_name)
+	sended_message = ''
+	search_date = today_date
+
 	try:
 		i = dates.index(search_date)
 		sended_message += '===={}====\n'.format(dates[i])
 		for j in range(len(schedule[i]['title'])):
 			print()
 			sended_message += '⌚' + schedule[i]['time'][j] + '\n📝' + schedule[i]['title'][j] + (('\n👤' + schedule[i]['lecturer'][j]['name']) if (schedule[i]['lecturer'][j]['name'] != 'None') else '') + ('\n📍' + schedule[i]['location'][j] + '\n' if schedule[i]['location'][j] != 'None' else '\n') + schedule[i]['type'][j] + '\n'
-		
+			sended_message += '''
+			'''
 	except ValueError:
 		sended_message = 'Пар нет, отдыхай :)'
-	
+
 	print('\nОтправляемое сообщение (Сегодня/завтра):\n\n', group_name, '\n', sended_message, '\n')
-	bot.send_message(message.chat.id, sended_message)
+	bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=sended_message)
 
 
-@bot.message_handler(func=lambda message: 'Какая следующая пара?' == message.text)  # Останавливать его на след. день
-def next_lesson(message):
-	return
-	print(datetime.now(), "\nСлед. пара ", message.chat.id, message.chat.username)
-	group_name = opendb().find_gr(message)
-	print(group_name)
-	schedule = take_schedule(message, group_name)
-	search_date = date.today().strftime('%d.%m.%Y')
-	sended_message = ''
+@bot.callback_query_handler(func=lambda call: call.data == 'next_lesson') 
+def next_lesson(call):
+	group_name = opendb().find_gr(call.message)
+	
+	dates, schedule = get_scheldue(group_name) #Выбираем группу
+	sended_message = '' 
 
-	for day in schedule:
+	search_date = today_date
 
-		if day == '':
-			break
+	try:
+		i = dates.index(search_date)
+		day = schedule[i] #Берем расписание на сегодня
+		j = 0
+		nowtime = (datetime.now() + timedelta(hours=3)).strftime('%H:%M') #Поправка на отличие времени сервера
+		
+		while sended_message == '' and j < len(day['time']):
+			tdy_time = day['time'][j]
 
-		lesson_date = re.match(r'\d{2}\.\d{2}\.\d{4}', day).group()
-		lesson_start_time = re.findall(r'\d+:\d{2}:\d{2}', day)[0]
+			if nowtime < tdy_time.split()[0]:
+				lctr = '👤{}\n'.format(day['lecturer'][j]['name']) if (day['lecturer'][j]['name'] != 'None') else ''
+				lctn = '📍{}\n'.format(day['location'][j]) if day['location'][j] != 'None' else '\n'
+				
+				sended_message = 'Следующая пара: \n\n===== {} =====\n⌚ {}\n📝{}\n{}{}{}'.format(dates[i], day['time'][j], day['title'][j], lctr, lctn, day['type'][j])
 
-		if lesson_start_time == '9:00:00':
-			lesson_start_time = '09:00:00'
-
-		lesson_name = day.split('\t')[-4]
-		if lesson_name == 'Военная кафедра':
-			break
-		lesson_teacher_name = day.split('\t')[-3]
-		try:
-			lesson_type = config.types_of_lessons[day.split('\t')[-1]]
-		except KeyError:
-			lesson_type = day.split('\t')[-1]
-		lesson_location = day.split('\t')[-2]
-
-		if lesson_date == search_date and lesson_start_time > datetime.now().strftime('%H:%M:%S'):
-			sended_message = 'Следующая пара:\n' '⌚' + lesson_start_time[:-3] + '\n📝' + lesson_name + (
-				('\n👤' + lesson_teacher_name + '\n📍') if (
-							lesson_teacher_name != 'NONAME NONAME ') else '\n📍') + lesson_location + '\n' + lesson_type + '\n'
-			break
-
-	if sended_message == '':
-		sended_message = 'Сегодня больше нет пар :)'
-
-	bot.send_message(message.chat.id, sended_message)
-	print('\nОтправляемое сообщение (След. пара):\n\n', group_name, '\n', sended_message, '\n')
-
+			j += 1
+			
+		if sended_message == '':
+			day = schedule[dates.index(tomorrow_date)]
+			lctr = '👤{}\n'.format(day['lecturer'][0]['name']) if (day['lecturer'][0]['name'] != 'None') else ''
+			lctn = '📍{}\n'.format(day['location'][0]) if day['location'][0] != 'None' else '\n'
+			sended_message = 'Следующая пара: \n\n===== {} =====\n⌚ {}\n📝{}\n{}{}{}'.format(dates[i], day['time'][0], day['title'][0], lctr, lctn, day['type'][0])
+#			sended_message = 'Сегодня больше нет пар, отдыхай :)'
+		
+		bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=sended_message)
+		
+	except Exception as e:
+		sended_message = 'Тут ошибка'
+		bot.send_message(call.message.chat.id, sended_message)
+		bot.send_message(64634999, 'Следующую пару не нашел у ' + group_name + 'по причине ' + e)
+	
 
 @bot.message_handler(func=lambda message: 'Когда уже домой?' == message.text)
 def when_freedom(message):
@@ -312,15 +345,15 @@ def when_freedom(message):
 	print(group_name)
 	dates, schedule = get_scheldue(group_name)
 	sended_message = ''
-	
+
 	try:
 		i = dates.index(today_date)
-		
+
 		for j in range(len(schedule[i]['time'])):
-		
+
 			lesson_start_time = re.findall(r'\d\d:\d\d', schedule[i]['time'][j])[0]
 			lesson_end_time = re.findall(r'\d\d:\d\d', schedule[i]['time'][j])[1]
-			
+
 			if lesson_start_time < datetime.now().strftime('%H:%M:%S') < lesson_end_time:
 				hour = int(lesson_end_time[0:2]) - int(datetime.now().strftime('%H'))
 				minute = int(lesson_end_time[3:5]) - int(datetime.now().strftime('%M'))
@@ -354,78 +387,68 @@ def when_freedom(message):
 
 			else:
 				sended_message = 'Ты уже свободен на сегодня'
-		
-		
+
+
 	except ValueError:
 		sended_message = 'На сегодня ты свободен!'
 
-		
+
 
 	bot.send_message(message.chat.id, sended_message)
 	print('\nОтправляемое сообщение (Когда домой):\n\n', group_name, sended_message, '\n')
 
 
-@bot.message_handler(func=lambda message: 'На неделю' == message.text)
-def week_table(message):
-	print(datetime.now(), "\nНа неделю ", message.chat.id, message.chat.username)
-	group_name = opendb().find_gr(message)
+@bot.callback_query_handler(func=lambda call: call.data == 'week_schedule')
+def week_table(call):
+	group_name = opendb().find_gr(call.message)
 	print(group_name)
 	dates, schedule = get_scheldue(group_name)
 	sended_message = ''
-	
+
+	print(dates)
 	for i in range(len(dates)):
 		sended_message += '===={}====\n'.format(dates[i])
 		for j in range(len(schedule[i]['title'])):
 			print()
 			sended_message += '⌚' + schedule[i]['time'][j] + '\n📝' + schedule[i]['title'][j] + (('\n👤' + schedule[i]['lecturer'][j]['name']) if (schedule[i]['lecturer'][j]['name'] != 'None') else '') + ('\n📍' + schedule[i]['location'][j] + '\n' if schedule[i]['location'][j] != 'None' else '\n') + schedule[i]['type'][j] + '\n'
-		
+			sended_message += '\n'
 		sended_message += '\n'
-		
-	bot.send_message(message.chat.id, sended_message)
-	print('\nОтправляемое сообщение (Неделя):\n\n', group_name, '\n', sended_message, '\n')
-
-
-@bot.message_handler(func=lambda message: 'Какая лаба следующая?' == message.text)
-def next_laba(message):
-	return
-	print(datetime.now(), "\nЛабы ", message.chat.id, message.chat.username)
-	group_name = opendb().find_gr(message)
-	print(group_name)
-	schedule = take_schedule(message, group_name)
-	search_date = date.today().strftime('%d.%m.%Y')
-	sended_message = ''
-
-	for day in schedule:
-		if day == None or day == ' ':
-			break
-		lesson_date = re.match(r'\d{2}\.\d{2}\.\d{4}', day).group()
-		lesson_start_time = re.findall(r'\d+:\d{2}:\d{2}', day)[0]
-		lesson_name = day.split('\t')[-4]
-		lesson_day_name = day.split('\t')[1]
-
-		if lesson_name == 'Военная кафедра' or day == '':
-			break
-
-		lesson_teacher_name = day.split('\t')[-3]
-
-		try:
-			lesson_type = config.types_of_lessons[day.split('\t')[-1]]
-		except KeyError:
-			lesson_type = day.split('\t')[-1]
-
-		lesson_location = day.split('\t')[-2]
-
-		if 'Лабораторная' in lesson_type:
-			sended_message = 'Следующая лаба:\n' + '===== ' + lesson_day_name + ' =====\n⌚' + lesson_start_time[
-																							  :-3] + '\n📝' + lesson_name + (
-								 ('\n👤' + lesson_teacher_name + '\n📍') if (
-											 lesson_teacher_name != 'NONAME NONAME ') else '\n📍') + lesson_location + '\n'
-			break
 
 	if sended_message == '':
-		sended_message = 'Лабы не скоро :)'
+		sended_message = 'Пар нет или расписание не закончено'
 
-	bot.send_message(message.chat.id, sended_message)
+	bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=sended_message)
+	print('\nОтправляемое сообщение (Неделя):\n\n', group_name, '\n', sended_message, '\n')
+
+@bot.callback_query_handler(func=lambda call: call.data == 'next_laba')
+def next_laba(call):
+	group_name = opendb().find_gr(call.message)
+	print(group_name)
+	dates, schedule = get_scheldue(group_name)
+	
+	done = False
+	i = 0
+	
+	while not done:
+		try:
+			day = schedule[i]
+		
+		except IndexError:
+			sended_message = 'Лабы не скоро :)'
+		
+		try:
+			done = True
+			
+			lsn_indx = day['type'].index('ЛР')
+			lctr = ('👤{}\n'.format(day['lecturer'][lsn_indx]['name']) if (day['lecturer'][lsn_indx]['name'] != 'None') else '')
+			lctn = '📍{}\n'.format(day['location'][lsn_indx]) if day['location'][lsn_indx] != 'None' else '\n'
+			sended_message = 'Следубщая лабораторная:\n\n===== {} =====\n⌚ {}\n📝{}\n{}{}'.format(dates[i], day['time'][lsn_indx], day['title'][lsn_indx], lctr, lctn) 
+			
+		except:
+			done = False
+			
+		i += 1
+	bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=sended_message)
 	print('\nОтправляемое сообщение (Неделя):\n\n', group_name, '\n', sended_message, '\n')
 
 
@@ -438,48 +461,36 @@ def developers(message):
 @bot.message_handler(func=lambda message: current_func == 'change_group')
 def change_gr(message):
 	print('\nПоменяй группу ', message.chat.id, datetime.now())
-	all_groups = os.listdir('data')
 
-	if not (message.text + '.txt') in all_groups:
+	all_groups = get_grp_list()
+
+	if not (message.text in all_groups):
 		bot.send_message(message.chat.id, config.completef)
 		return
 
 	opendb().upd_gr(message)
 
 	bot.send_message(message.chat.id, config.completet)
-	global current_func
-	current_func = ''
 	handle_help(message)
 
 
 @bot.message_handler(content_types=["text"])  # Обрабатывет все текстовые сообщения, полученные от пользователя
 def repeat_all_messages(message):
-	print(message.text, message.chat.id, datetime.now())
-	global current_func
-	current_func = 'change_group'
-
-	all_groups = os.listdir('data')
+	all_groups = get_grp_list()
 
 	user_row = opendb().find_usr(message)
 
-	print('User_row:', user_row, 'n')
+	print('User_row:', user_row)
 	print(datetime.now(), 'Обработка всех сообщений. Сообщение - ', message.text, user_row)
-
-	if user_row != None and user_row != '':
-		current_func = ''
-		return
-
-	print(datetime.now(), "Группы нет ", message.chat.id, message.chat.username)
-
-	if not ((message.text + '.txt') in all_groups):
-		opendb().ins_id(message)
-		bot.send_message(message.chat.id, config.completef)
-	else:
-		opendb().ins_all(message)
-		bot.send_message(message.chat.id, config.completet)
-		current_func = ''
-		handle_help(message)
-
+	
+	if user_row == None or user_row[2] == None:
+		msg = bot.send_message(message.chat.id, 'А у тебя тут группа не записана, напиши мне шифр своей группы в формате М**-****-** (Если не ранее 2016 года поступления) или **-****-** (В иных случаях) (Третья звездочка - буква О, а не нолик! [Это для очников, в вечерке там В]), например: М4О-211Б-16 или 4О-404Б-14, если ваш факультет прикрепили к кому-то, то *-***-****-**')
+		if user_row == None:
+			opendb().ins_id(message)
+		
+		bot.register_next_step_handler(msg, change_gr)
+	
+	
 if __name__ == '__main__':
 	current_func = ''
 	bot.polling(none_stop=True)  # Благодаря этой строке бот проверяет обновления в диалоге постоянно
